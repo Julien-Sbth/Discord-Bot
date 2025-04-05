@@ -160,25 +160,6 @@ class OffreView(discord.ui.View):
                 "❌ Une erreur est survenue lors de l'enregistrement",
                 ephemeral=True
             )
-def extract_email_body(payload: Dict) -> str:
-    parts = payload.get("parts", [])
-    for part in parts:
-        if part.get("mimeType") == "text/plain":
-            return part.get("body", {}).get("data", "")
-    return ""
-
-def search_emails(service: build, query: str = "") -> List[Dict]:
-    try:
-        results = service.users().messages().list(
-            userId="me",
-            q=query,
-            maxResults=MAX_RESULTS
-        ).execute()
-        return results.get("messages", [])
-    except Exception as e:
-        print(f"❌ Erreur lors de la recherche des emails: {e}")
-        return []
-
 
 def get_email_details(service: build, message_id: str) -> Optional[Dict]:
     try:
