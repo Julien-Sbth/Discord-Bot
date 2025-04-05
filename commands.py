@@ -6,13 +6,21 @@ import discord
 from discord.ext import commands
 import asyncio
 from odf.opendocument import OpenDocumentText
-from odf.style import Style, TableCellProperties
-from odf.table import Table, TableRow, TableCell, TableColumn
+from odf.style import Style
+from odf.table import Table, TableCell
 from odf.text import P
 from apify_client import ApifyClient
 from odf.style import TableCellProperties
 from odf.table import TableRow, TableColumn
+import time
 
+from Gmail import get_gmail_service
+from config import MAX_RESULTS
+from search_emails import search_emails
+from emails_details import get_email_details
+from display_email import display_email
+from format_email_embed import format_email_embed
+from is_rejection_email import is_rejection_email
 from utils import load_posted_offer_ids, log_message
 
 intents = discord.Intents.default()
@@ -184,5 +192,61 @@ def setup_commands(bot):
         except sqlite3.Error as e:
             print(f"Erreur SQLite: {e}")
             return None
+    @bot.tree.command(name="emails", description="Recherche les derniers emails Gmail selon un filtre")
+    async def emails(interaction: discord.Interaction, query: str = "in:inbox"):
+        await interaction.response.defer(thinking=True)
+
+        service = None
+        max_retries = 3
+        last_error = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                if not service:
+                    service = get_gmail_service()
+                    if not service:
+                        raise RuntimeError("Service Gmail non initialisé.")
+
+                messages = search_emails(service, query)
+
+                if not messages:
+                    await interaction.followup.send("🔍 Aucun e-mail trouvé avec ce filtre.")
+                    return
+
+                embeds = []
+                for i, msg in enumerate(messages[:MAX_RESULTS]):
+                    try:
+                        email_data = get_email_details(service, msg["id"])
+
+                        if email_data:
+                            is_reject = is_rejection_email(email_data)
+                            display_email(email_data)  # Affiche dans console pour debug
+                            embed = format_email_embed(email_data, is_reject)
+                            embeds.append(embed)
+
+                        if i % 5 == 0:
+                            time.sleep(0.1)
+
+                    except Exception as e:
+                        print(f"Erreur lors du traitement de l'email {msg.get('id')} : {e}")
+                        continue
+
+                if embeds:
+                    await interaction.followup.send(f"📬 **{len(embeds)} e-mails trouvés** - Filtre : `{query}`")
+                    for embed in embeds:
+                        await interaction.channel.send(embed=embed)
+                else:
+                    await interaction.followup.send("Aucun e-mail exploitable trouvé.")
+
+            except Exception as e:
+                last_error = e
+                wait = attempt * 2
+                if attempt < max_retries:
+                    print(f"Tentative {attempt}/{max_retries} échouée. Nouvelle tentative dans {wait}s...")
+                    time.sleep(wait)
+                    service = None
+                else:
+                    await interaction.followup.send(f"❌ Échec après {max_retries} tentatives : {last_error}")
+                    return
 
 setup_commands(bot)
